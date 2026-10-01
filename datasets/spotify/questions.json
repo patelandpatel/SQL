@@ -1,0 +1,554 @@
+[
+  {
+    "id": 1,
+    "title": "Top 5 most streamed songs in 2023",
+    "task": "Return the top 5 tracks in the entire 2023 dataset snapshot, by known streams. This does not measure streams earned during 2023. Return track_name, artist_name, released_year, streams. Break ties by track_name then artist_name.",
+    "sql": "SELECT track_name, artist_name, released_year, streams FROM public.spotify\nWHERE streams IS NOT NULL\nORDER BY streams DESC, track_name, artist_name LIMIT 5;",
+    "note": "A top-N sort avoids fully ordering all rows. Exclude unknown streams explicitly. A release-year filter would answer a different question.",
+    "steps": [
+      "Start with the full snapshot: do not filter released_year when the question asks for the most streamed tracks in this dataset.",
+      "Remove unknown stream totals, sort the remaining totals descending, and use title and artist as tie-breakers.",
+      "LIMIT 5 keeps the first five rows after ordering."
+    ],
+    "category": "General song information",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 2,
+    "title": "Unique contributing artists",
+    "task": "Estimate distinct individual artist names by splitting artist_name on commas and trimming spaces; remove empty tokens. Output unique_artists. This assumes commas separate credits; names containing commas and spelling/encoding variants make this an estimate.",
+    "sql": "SELECT COUNT(DISTINCT a.artist) AS unique_artists FROM public.spotify s\nCROSS JOIN LATERAL (SELECT DISTINCT btrim(v) AS artist FROM unnest(string_to_array(s.artist_name, ',')) AS u(v) WHERE btrim(v) <> '') a;",
+    "note": "COUNT(DISTINCT artist_name) counts credit combinations, not individual artists. Splitting expands rows; at larger scale use artist and track_artist tables with stable IDs.",
+    "steps": [
+      "Split each artist credit string on commas, then trim whitespace from each token.",
+      "The lateral subquery expands each track into its credited names and discards empty names.",
+      "COUNT(DISTINCT artist) counts parsed names, not credit combinations. This is still an estimate of real identities."
+    ],
+    "category": "General song information",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 3,
+    "title": "Songs across release years",
+    "task": "Return released_year, songs, pct_of_dataset (2 decimals), ascending year.",
+    "sql": "SELECT released_year, COUNT(*) AS songs,\nROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_dataset\nFROM public.spotify GROUP BY released_year ORDER BY released_year;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "GROUP BY released_year creates one group per release year.",
+      "COUNT(*) counts stored observations in each year.",
+      "SUM(COUNT(*)) OVER () totals the grouped counts; multiply by 100.0 to avoid integer division, then round."
+    ],
+    "category": "General song information",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 4,
+    "title": "Top 10 artists and their audio features",
+    "task": "Popularity proxy = total known streams, with full track credit to each parsed individual artist. Output artist, tracks, known_stream_tracks, total_streams, avg_danceability, avg_energy (averages 2 decimals). Rank descending total_streams NULLS LAST then artist; limit 10. Full credit means totals are not additive across artists.",
+    "sql": "SELECT a.artist, COUNT(*) AS tracks, COUNT(streams) AS known_stream_tracks,\nSUM(streams) AS total_streams, ROUND(AVG(danceability_pct),2) AS avg_danceability, ROUND(AVG(energy_pct),2) AS avg_energy\nFROM public.spotify s CROSS JOIN LATERAL (SELECT DISTINCT btrim(v) AS artist FROM unnest(string_to_array(s.artist_name, ',')) AS u(v) WHERE btrim(v) <> '') a\nGROUP BY a.artist ORDER BY total_streams DESC NULLS LAST, a.artist LIMIT 10;",
+    "note": "Split credits once, then group. Deduplicate repeated tokens within a track. AVG of features includes all that artist\u2019s tracks, even one with unknown streams.",
+    "steps": [
+      "Expand each track into distinct parsed artist credits. Give every credited artist full credit for the track.",
+      "Group by individual artist and compute track count, known stream count, summed streams and average audio features.",
+      "Order total streams descending with unknown totals last and keep ten artists. Audio averages include tracks even when their streams are unknown."
+    ],
+    "category": "General song information",
+    "difficulty": "Advanced",
+    "schemaReasoning": false
+  },
+  {
+    "id": 5,
+    "title": "Artists with longest and shortest songs",
+    "task": "Schema reasoning: determine whether this is answerable. Query metadata for duration columns, returning column_name and data_type. Explain the missing information rather than substituting BPM or title length.",
+    "sql": "SELECT column_name, data_type FROM information_schema.columns\nWHERE table_schema='public' AND table_name='spotify' AND column_name ILIKE '%duration%'\nORDER BY column_name;",
+    "note": "Not answerable: no duration column. Empty metadata output is the expected result. Obtain duration_ms plus reliable track IDs before answering.",
+    "steps": [
+      "Inspect information_schema.columns rather than guessing a duration field.",
+      "Filter the actual table metadata for column names containing duration.",
+      "The empty result shows that this schema cannot answer longest or shortest songs; request duration and reliable track IDs."
+    ],
+    "category": "General song information",
+    "difficulty": "Schema check",
+    "schemaReasoning": true
+  },
+  {
+    "id": 6,
+    "title": "Most Spotify playlists",
+    "task": "Return every track tied for maximum in_spotify_playlists: track_name, artist_name, in_spotify_playlists. Order by track_name, artist_name.",
+    "sql": "SELECT track_name, artist_name, in_spotify_playlists FROM public.spotify\nWHERE in_spotify_playlists = (SELECT MAX(in_spotify_playlists) FROM public.spotify)\nORDER BY track_name, artist_name;",
+    "note": "Two small scans are fine; MAX preserves all ties, unlike LIMIT 1.",
+    "steps": [
+      "Calculate the highest Spotify playlist count with MAX.",
+      "Keep every row equal to that maximum, preserving ties.",
+      "Order the tied rows by title and artist for a stable displayed result."
+    ],
+    "category": "Spotify metrics",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 7,
+    "title": "Streams vs Spotify charts",
+    "task": "Correlate streams with the number of Spotify charts containing the track. Chart counts are not chart ranks. Output paired_tracks and pearson_r rounded to 4 decimals; use only rows where both values are known.",
+    "sql": "SELECT COUNT(*) AS paired_tracks, ROUND(CORR(streams, in_spotify_charts)::numeric,4) AS pearson_r\nFROM public.spotify WHERE streams IS NOT NULL AND in_spotify_charts IS NOT NULL;",
+    "note": "CORR computes Pearson correlation in one scan. It measures linear association, not causation; inspect outliers and skew before interpreting it. NULL correlation means insufficient pairs or zero variance.",
+    "steps": [
+      "Use only tracks where streams and Spotify chart count are both known.",
+      "CORR calculates Pearson linear correlation across those pairs.",
+      "Return the paired sample count alongside the rounded coefficient; chart counts are not chart positions."
+    ],
+    "category": "Spotify metrics",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 8,
+    "title": "Average BPM",
+    "task": "Output tracks_with_bpm and avg_bpm rounded to 2 decimals, across the entire table.",
+    "sql": "SELECT COUNT(bpm) AS tracks_with_bpm, ROUND(AVG(bpm),2) AS avg_bpm FROM public.spotify;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "AVG(bpm) averages known BPM values; COUNT(bpm) reports how many values contribute.",
+      "Round only the displayed average to two decimal places."
+    ],
+    "category": "Spotify metrics",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 9,
+    "title": "Danceability of top 15 tracks",
+    "task": "Popularity proxy = known streams. Take exactly 15 tracks ordered by streams DESC, track_name, artist_name. Output tracks and avg_danceability rounded to 2 decimals.",
+    "sql": "WITH top_tracks AS (SELECT danceability_pct FROM public.spotify WHERE streams IS NOT NULL\nORDER BY streams DESC, track_name, artist_name LIMIT 15)\nSELECT COUNT(*) AS tracks, ROUND(AVG(danceability_pct),2) AS avg_danceability FROM top_tracks;",
+    "note": "Apply LIMIT before AVG. Averaging all rows then adding LIMIT does not answer this question.",
+    "steps": [
+      "The inner query first selects exactly 15 tracks by known streams, using the declared tie-breakers.",
+      "The outer query averages danceability only within that selected set.",
+      "Putting LIMIT after an aggregate over the whole table would not select the top tracks first."
+    ],
+    "category": "Spotify metrics",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 10,
+    "title": "Both Apple Music and Spotify charts",
+    "task": "Presence means a chart count greater than zero. Output songs.",
+    "sql": "SELECT COUNT(*) AS songs FROM public.spotify WHERE in_apple_charts > 0 AND in_spotify_charts > 0;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "A positive count indicates chart presence.",
+      "Use AND so a track must meet both platform conditions, then count qualifying rows."
+    ],
+    "category": "Apple Music metrics",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 11,
+    "title": "Apple playlist presence and valence",
+    "task": "Compare absent (0), present (>0), and unknown (NULL) groups, returning playlist_presence, tracks, avg_valence (2 decimals), sorted by playlist_presence. Only observed groups need appear.",
+    "sql": "SELECT CASE WHEN in_apple_playlists IS NULL THEN 'unknown' WHEN in_apple_playlists > 0 THEN 'present' ELSE 'absent' END AS playlist_presence,\nCOUNT(*) AS tracks, ROUND(AVG(valence_pct),2) AS avg_valence FROM public.spotify\nGROUP BY 1 ORDER BY 1;",
+    "note": "An average difference is descriptive; it does not establish statistical significance or an effect caused by playlists.",
+    "steps": [
+      "Use CASE to distinguish positive playlist counts, zero counts and unknown counts.",
+      "Group by that classification and compute sample size and average valence.",
+      "Compare the groups descriptively; playlist presence does not prove a cause of valence."
+    ],
+    "category": "Apple Music metrics",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 12,
+    "title": "Deezer charts by release month",
+    "task": "Use release months across all years, not historical chart movements. Output released_month, tracks, charted_tracks (>0), charted_pct (2 decimals of known counts), avg_chart_count (2 decimals). Sort by month.",
+    "sql": "SELECT released_month, COUNT(*) AS tracks, COUNT(*) FILTER (WHERE in_deezer_charts>0) AS charted_tracks,\nROUND(100.0 * COUNT(*) FILTER (WHERE in_deezer_charts>0) / NULLIF(COUNT(in_deezer_charts),0),2) AS charted_pct,\nROUND(AVG(in_deezer_charts),2) AS avg_chart_count FROM public.spotify GROUP BY released_month ORDER BY released_month;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group all tracks by release month across the dataset\u2019s release years.",
+      "Use a FILTER to count confirmed Deezer chart appearances.",
+      "Divide by known chart counts for the appearance rate, and retain the average chart count and group size."
+    ],
+    "category": "Deezer metrics",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 13,
+    "title": "Both Deezer and Spotify playlists",
+    "task": "Count tracks with both playlist counts greater than zero. Output songs.",
+    "sql": "SELECT COUNT(*) AS songs FROM public.spotify WHERE in_deezer_playlists > 0 AND in_spotify_playlists > 0;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Require positive counts for both Deezer playlists and Spotify playlists.",
+      "COUNT(*) returns the number of track observations meeting both conditions."
+    ],
+    "category": "Deezer metrics",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 14,
+    "title": "Shazam performance and danceability",
+    "task": "Define high presence as >=100 Shazam charts; low presence as 1\u201399; absent as 0; unknown as NULL. Return shazam_group, tracks, avg_danceability (2 decimals), alphabetical group order. The 100 threshold is an exercise convention, not a validated success criterion.",
+    "sql": "SELECT CASE WHEN in_shazam_charts IS NULL THEN 'unknown' WHEN in_shazam_charts >=100 THEN 'high' WHEN in_shazam_charts>0 THEN 'low' ELSE 'absent' END AS shazam_group,\nCOUNT(*) AS tracks, ROUND(AVG(danceability_pct),2) AS avg_danceability FROM public.spotify GROUP BY 1 ORDER BY 1;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Use CASE to create the declared Shazam groups: unknown, high (100+), low (1\u201399), and absent.",
+      "Aggregate track counts and mean danceability per group.",
+      "The threshold is a convention for this exercise; it is not a universal definition of success."
+    ],
+    "category": "Shazam metrics",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 15,
+    "title": "Speechiness distribution on Shazam",
+    "task": "For tracks on >0 Shazam charts, bucket speechiness into 0\u20139, 10\u201319, \u2026, 90\u2013100. Output bucket_start, tracks and pct (2 decimals). Only occupied bins; sort by bucket_start.",
+    "sql": "WITH b AS (SELECT LEAST(speechiness_pct / 10,9)*10 AS bucket_start FROM public.spotify\nWHERE in_shazam_charts>0 AND speechiness_pct IS NOT NULL)\nSELECT bucket_start, COUNT(*) AS tracks, ROUND(100.0*COUNT(*)/SUM(COUNT(*)) OVER (),2) AS pct\nFROM b GROUP BY bucket_start ORDER BY bucket_start;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Keep tracks appearing on at least one Shazam chart and with known speechiness.",
+      "Integer division creates decade bins; LEAST places a value of 100 into the final 90\u2013100 bin.",
+      "Count occupied bins and divide by the total eligible count to get percentages."
+    ],
+    "category": "Shazam metrics",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 16,
+    "title": "Major vs minor danceability",
+    "task": "Output mode, tracks, avg_danceability (2 decimals), ordered by mode. Describe the difference without claiming significance.",
+    "sql": "SELECT mode, COUNT(*) AS tracks, ROUND(AVG(danceability_pct),2) AS avg_danceability FROM public.spotify GROUP BY mode ORDER BY mode;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group observations by mode.",
+      "Compute each group\u2019s count and average danceability; order by mode.",
+      "Describe the difference without claiming it is statistically significant."
+    ],
+    "category": "Audio features",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 17,
+    "title": "Acousticness distribution by key",
+    "task": "Output key (keep NULL as unknown), tracks, min_acousticness, p25, median, p75, max_acousticness, avg_acousticness. Round percentiles and average to 2 decimals; order by key NULLS LAST.",
+    "sql": "SELECT key, COUNT(*) AS tracks, MIN(acousticness_pct) AS min_acousticness,\nROUND((PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY acousticness_pct))::numeric,2) AS p25,\nROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY acousticness_pct))::numeric,2) AS median,\nROUND((PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY acousticness_pct))::numeric,2) AS p75,\nMAX(acousticness_pct) AS max_acousticness, ROUND(AVG(acousticness_pct),2) AS avg_acousticness\nFROM public.spotify GROUP BY key ORDER BY key NULLS LAST;",
+    "note": "Ordered-set percentiles require sorting values. Keep group counts visible; small samples make comparisons unstable.",
+    "steps": [
+      "Group by key, keeping NULL as a separate unknown group.",
+      "Calculate minimum, maximum, average, and continuous quartiles of acousticness within each group.",
+      "Percentiles describe the distribution rather than only its center; compare group sizes too."
+    ],
+    "category": "Audio features",
+    "difficulty": "Advanced",
+    "schemaReasoning": false
+  },
+  {
+    "id": 18,
+    "title": "Energy by release year",
+    "task": "Output released_year, tracks, avg_energy (2 decimals), ordered by year. These are release cohorts in this sample, not the whole music industry over time.",
+    "sql": "SELECT released_year, COUNT(*) AS tracks, ROUND(AVG(energy_pct),2) AS avg_energy FROM public.spotify GROUP BY released_year ORDER BY released_year;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group tracks by release year and calculate average energy.",
+      "Keep the number of observations visible so sparse years are recognizable.",
+      "These are release cohorts in a selected snapshot, not historical measurements of all music."
+    ],
+    "category": "Audio features",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 19,
+    "title": "Most common keys",
+    "task": "Return key, tracks, pct_of_dataset (2 decimals); include NULL separately. Sort tracks descending then key NULLS LAST.",
+    "sql": "SELECT key, COUNT(*) AS tracks, ROUND(100.0*COUNT(*)/SUM(COUNT(*)) OVER (),2) AS pct_of_dataset\nFROM public.spotify GROUP BY key ORDER BY tracks DESC, key NULLS LAST;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group by musical key, including unknown keys as a separate group.",
+      "Count each group and divide by the whole dataset count for its share.",
+      "Sort counts descending to identify the most represented keys."
+    ],
+    "category": "Audio features",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 20,
+    "title": "Artist count for charted songs",
+    "task": "Charted = >0 on at least one of Spotify, Apple, Deezer or Shazam charts. Output charted_tracks and avg_artist_count (2 decimals). An unknown count alone does not prove presence.",
+    "sql": "SELECT COUNT(*) AS charted_tracks, ROUND(AVG(artist_count),2) AS avg_artist_count FROM public.spotify WHERE (in_spotify_charts > 0 OR in_apple_charts > 0 OR in_deezer_charts > 0 OR in_shazam_charts > 0);",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Combine the four chart-presence tests with OR: any confirmed appearance qualifies.",
+      "Count qualifying tracks and average their recorded artist_count.",
+      "NULL on one platform does not block a confirmed positive count on another."
+    ],
+    "category": "Artist impact",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 21,
+    "title": "Artist count vs danceability",
+    "task": "Group by artist_count; output artist_count, tracks, avg_danceability (2 decimals), ordered by artist_count. Compare observed groups without asserting causation.",
+    "sql": "SELECT artist_count, COUNT(*) AS tracks, ROUND(AVG(danceability_pct),2) AS avg_danceability FROM public.spotify GROUP BY artist_count ORDER BY artist_count;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group by the recorded artist_count instead of splitting artist names.",
+      "Compute sample sizes and average danceability for each collaboration size.",
+      "Compare the averages and their group sizes; this alone cannot show causation."
+    ],
+    "category": "Artist impact",
+    "difficulty": "Easy",
+    "schemaReasoning": false
+  },
+  {
+    "id": 22,
+    "title": "Valence by release month in 2023",
+    "task": "Restrict released_year=2023. Output released_month, tracks, avg_valence, p25, median, p75 (2 decimals), ordered by month. Only observed months; missing months do not mean zero releases.",
+    "sql": "SELECT released_month, COUNT(*) AS tracks, ROUND(AVG(valence_pct),2) AS avg_valence,\nROUND((PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY valence_pct))::numeric,2) AS p25,\nROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY valence_pct))::numeric,2) AS median,\nROUND((PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY valence_pct))::numeric,2) AS p75\nFROM public.spotify WHERE released_year=2023 GROUP BY released_month ORDER BY released_month;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Filter to tracks released in 2023 before grouping by release month.",
+      "Calculate average valence and quartiles to show the distribution within each observed month.",
+      "Do not invent zeros for months missing from this sample."
+    ],
+    "category": "Temporal trends",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 23,
+    "title": "Key patterns across years",
+    "task": "Return released_year, key, tracks, pct_within_year (2 decimals). Include unknown keys; order year then key NULLS LAST. Interpret as this snapshot\u2019s release cohorts.",
+    "sql": "SELECT released_year, key, COUNT(*) AS tracks,\nROUND(100.0*COUNT(*)/SUM(COUNT(*)) OVER (PARTITION BY released_year),2) AS pct_within_year\nFROM public.spotify GROUP BY released_year,key ORDER BY released_year,key NULLS LAST;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group by both release year and key.",
+      "A window partitioned by release year totals the key counts for each year.",
+      "Divide each key\u2019s count by its own year total, keeping unknown keys in that denominator."
+    ],
+    "category": "Temporal trends",
+    "difficulty": "Advanced",
+    "schemaReasoning": false
+  },
+  {
+    "id": 24,
+    "title": "Cross-platform presence",
+    "task": "Operational definition: a positive chart count on all four platforms. Return track_name, artist_name, streams and all four chart counts. Order known streams descending NULLS LAST then track_name, artist_name. This replaces the undefined word significant; no statistical significance is claimed.",
+    "sql": "SELECT track_name, artist_name, streams, in_spotify_charts, in_apple_charts, in_deezer_charts, in_shazam_charts\nFROM public.spotify WHERE in_spotify_charts>0 AND in_apple_charts>0 AND in_deezer_charts>0 AND in_shazam_charts>0\nORDER BY streams DESC NULLS LAST,track_name,artist_name;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Use AND across all four positive chart-count conditions.",
+      "Return the individual platform counts so the cross-platform presence can be inspected.",
+      "Sort by known stream totals descending and keep unknown stream totals last."
+    ],
+    "category": "Cross-platform presence",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 25,
+    "title": "Stream distribution vs Apple charts",
+    "task": "Group Apple chart counts as absent (0), present (>0), unknown (NULL). Output apple_chart_presence, tracks, known_stream_tracks, min_streams, avg_streams, median_streams, max_streams. Round average/median to 2 decimals; sort by group.",
+    "sql": "SELECT CASE WHEN in_apple_charts IS NULL THEN 'unknown' WHEN in_apple_charts>0 THEN 'present' ELSE 'absent' END AS apple_chart_presence,\nCOUNT(*) AS tracks, COUNT(streams) AS known_stream_tracks, MIN(streams) AS min_streams, ROUND(AVG(streams),2) AS avg_streams,\nROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY streams))::numeric,2) AS median_streams, MAX(streams) AS max_streams\nFROM public.spotify GROUP BY 1 ORDER BY 1;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Classify Apple chart presence into positive, zero or unknown.",
+      "For each group, report total tracks and known stream totals separately.",
+      "Compare minimum, median, mean and maximum streams; skew can make the mean differ greatly from the median."
+    ],
+    "category": "Cross-platform presence",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 26,
+    "title": "BPM vs danceability",
+    "task": "Measure linear association. Output paired_tracks and pearson_r rounded to 4 decimals; use only rows where both values are known.",
+    "sql": "SELECT COUNT(*) AS paired_tracks, ROUND(CORR(bpm, danceability_pct)::numeric,4) AS pearson_r\nFROM public.spotify WHERE bpm IS NOT NULL AND danceability_pct IS NOT NULL;",
+    "note": "CORR computes Pearson correlation in one scan. It measures linear association, not causation; inspect outliers and skew before interpreting it. NULL correlation means insufficient pairs or zero variance.",
+    "steps": [
+      "Select pairs with known BPM and danceability.",
+      "CORR measures their linear association and COUNT reports its sample size.",
+      "Round the output coefficient; do not confuse association with a causal effect."
+    ],
+    "category": "Correlation analysis",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 27,
+    "title": "Liveness vs acousticness",
+    "task": "Measure linear association. Liveness is an audio feature, not verified concert attendance. Output paired_tracks and pearson_r rounded to 4 decimals; use only rows where both values are known.",
+    "sql": "SELECT COUNT(*) AS paired_tracks, ROUND(CORR(liveness_pct, acousticness_pct)::numeric,4) AS pearson_r\nFROM public.spotify WHERE liveness_pct IS NOT NULL AND acousticness_pct IS NOT NULL;",
+    "note": "CORR computes Pearson correlation in one scan. It measures linear association, not causation; inspect outliers and skew before interpreting it. NULL correlation means insufficient pairs or zero variance.",
+    "steps": [
+      "Select known liveness and acousticness pairs.",
+      "Compute Pearson correlation and report the number of pairs.",
+      "Liveness is an audio feature estimate, not proof that a song was recorded at a concert."
+    ],
+    "category": "Correlation analysis",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 28,
+    "title": "Valence vs streams",
+    "task": "Measure linear association of valence and known stream totals. Output paired_tracks and pearson_r rounded to 4 decimals; use only rows where both values are known.",
+    "sql": "SELECT COUNT(*) AS paired_tracks, ROUND(CORR(valence_pct, streams)::numeric,4) AS pearson_r\nFROM public.spotify WHERE valence_pct IS NOT NULL AND streams IS NOT NULL;",
+    "note": "CORR computes Pearson correlation in one scan. It measures linear association, not causation; inspect outliers and skew before interpreting it. NULL correlation means insufficient pairs or zero variance.",
+    "steps": [
+      "Exclude unknown valence or stream values from the paired sample.",
+      "Compute Pearson correlation on the raw values.",
+      "Streams can be strongly skewed; a single coefficient can hide outliers or nonlinear relationships."
+    ],
+    "category": "Popularity analysis",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 29,
+    "title": "Spotify playlists vs Apple charts",
+    "task": "Measure linear association between the two counts. Output paired_tracks and pearson_r rounded to 4 decimals; use only rows where both values are known.",
+    "sql": "SELECT COUNT(*) AS paired_tracks, ROUND(CORR(in_spotify_playlists, in_apple_charts)::numeric,4) AS pearson_r\nFROM public.spotify WHERE in_spotify_playlists IS NOT NULL AND in_apple_charts IS NOT NULL;",
+    "note": "CORR computes Pearson correlation in one scan. It measures linear association, not causation; inspect outliers and skew before interpreting it. NULL correlation means insufficient pairs or zero variance.",
+    "steps": [
+      "Pair Spotify playlist counts with Apple chart counts for each track.",
+      "Compute the correlation and paired sample count.",
+      "The two metrics measure different kinds of presence; correlation does not imply one causes the other."
+    ],
+    "category": "Popularity analysis",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 30,
+    "title": "Key and mode combinations",
+    "task": "Output key, mode, tracks, pct_of_dataset (2 decimals). Include unknown keys; order tracks DESC, key NULLS LAST, mode.",
+    "sql": "SELECT key, mode, COUNT(*) AS tracks, ROUND(100.0*COUNT(*)/SUM(COUNT(*)) OVER (),2) AS pct_of_dataset\nFROM public.spotify GROUP BY key,mode ORDER BY tracks DESC,key NULLS LAST,mode;",
+    "note": "Use one aggregation pass where possible; only sort the final grouped result.",
+    "steps": [
+      "Group by both key and mode to count every observed combination.",
+      "Use the total of grouped counts for whole-dataset percentages.",
+      "Sort by descending count and then the requested tie-breakers; keep unknown key groups."
+    ],
+    "category": "More to explore",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 31,
+    "title": "Speechiness in different Apple playlists",
+    "task": "Original question cannot identify individual playlists: only their counts exist. Adaptation: compare count bands 0, 1\u201349, 50\u201399, 100+, unknown. Output playlist_band, tracks, avg_speechiness (2 decimals), alphabetical band order.",
+    "sql": "SELECT CASE WHEN in_apple_playlists IS NULL THEN 'unknown' WHEN in_apple_playlists=0 THEN '0' WHEN in_apple_playlists<50 THEN '1-49' WHEN in_apple_playlists<100 THEN '50-99' ELSE '100+' END AS playlist_band,\nCOUNT(*) AS tracks, ROUND(AVG(speechiness_pct),2) AS avg_speechiness FROM public.spotify GROUP BY 1 ORDER BY 1;",
+    "note": "This answers an explicitly adapted question. Actual playlist comparisons require playlist IDs and a track-to-playlist membership table.",
+    "steps": [
+      "Recognize that playlist identities are unavailable: this adaptation groups by playlist-count bands.",
+      "CASE assigns each row to the specified band.",
+      "Compute mean speechiness and sample size for each band, without claiming these are individual playlist comparisons."
+    ],
+    "category": "More to explore",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 32,
+    "title": "Release-day patterns and charts",
+    "task": "Interpret release day as day of week. Derive dates from year, month, day. Output iso_weekday (Monday=1), tracks, charted_tracks (any of four platforms >0), charted_pct (2 decimals, denominator all tracks in weekday group). Sort weekday. Missing chart counts do not confirm absence; percentage is confirmed-presence rate.",
+    "sql": "WITH d AS (SELECT EXTRACT(ISODOW FROM MAKE_DATE(released_year,released_month,released_day))::int AS iso_weekday, (in_spotify_charts > 0 OR in_apple_charts > 0 OR in_deezer_charts > 0 OR in_shazam_charts > 0) AS charted FROM public.spotify)\nSELECT iso_weekday, COUNT(*) AS tracks, COUNT(*) FILTER (WHERE charted) AS charted_tracks,\nROUND(100.0*COUNT(*) FILTER (WHERE charted)/COUNT(*),2) AS charted_pct FROM d GROUP BY iso_weekday ORDER BY iso_weekday;",
+    "note": "Use MAKE_DATE only after validating component dates. A high charted count may simply reflect more releases on that weekday; compare rates and sample sizes.",
+    "steps": [
+      "MAKE_DATE builds a date from the validated release components.",
+      "EXTRACT(ISODOW) derives Monday=1 through Sunday=7, and OR defines confirmed appearance on any chart.",
+      "Group by weekday and compare both confirmed counts and their share of all tracks in that weekday group."
+    ],
+    "category": "More to explore",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 33,
+    "title": "Instrumentalness vs energy",
+    "task": "Measure linear association. Output paired_tracks and pearson_r rounded to 4 decimals; use only rows where both values are known.",
+    "sql": "SELECT COUNT(*) AS paired_tracks, ROUND(CORR(instrumentalness_pct, energy_pct)::numeric,4) AS pearson_r\nFROM public.spotify WHERE instrumentalness_pct IS NOT NULL AND energy_pct IS NOT NULL;",
+    "note": "CORR computes Pearson correlation in one scan. It measures linear association, not causation; inspect outliers and skew before interpreting it. NULL correlation means insufficient pairs or zero variance.",
+    "steps": [
+      "Use known instrumentalness and energy pairs.",
+      "Return the paired count and Pearson linear correlation.",
+      "Interpret this feature association without claiming a mechanism or cause."
+    ],
+    "category": "More to explore",
+    "difficulty": "Intermediate",
+    "schemaReasoning": false
+  },
+  {
+    "id": 34,
+    "title": "Outliers and anomalies",
+    "task": "Return a diagnostic table: check_name, affected_rows. Checks: missing streams/key/Shazam; duplicate extra rows by track_name+artist_name+release date; invalid percentage feature rows; nonpositive BPM; comma-token count mismatch vs artist_count; streams above Q3+1.5*IQR. Sort by check_name. Outliers are flags, not automatic errors.",
+    "sql": "WITH quartiles AS (SELECT PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY streams) AS q1, PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY streams) AS q3 FROM public.spotify),\nduplicates AS (SELECT COUNT(*) AS n FROM public.spotify GROUP BY track_name, artist_name, released_year, released_month, released_day HAVING COUNT(*)>1),\nchecks AS (\nSELECT 'missing_streams' AS check_name, COUNT(*) FILTER (WHERE streams IS NULL) AS affected_rows FROM public.spotify\nUNION ALL SELECT 'missing_key', COUNT(*) FILTER (WHERE key IS NULL) FROM public.spotify\nUNION ALL SELECT 'missing_shazam', COUNT(*) FILTER (WHERE in_shazam_charts IS NULL) FROM public.spotify\nUNION ALL SELECT 'duplicate_extra_rows', COALESCE(SUM(n-1),0)::bigint FROM duplicates\nUNION ALL SELECT 'invalid_percentage_rows', COUNT(*) FROM public.spotify s WHERE EXISTS (SELECT 1 FROM unnest(ARRAY[danceability_pct,valence_pct,energy_pct,acousticness_pct,instrumentalness_pct,liveness_pct,speechiness_pct]) v WHERE v<0 OR v>100)\nUNION ALL SELECT 'nonpositive_bpm', COUNT(*) FROM public.spotify WHERE bpm<=0\nUNION ALL SELECT 'artist_token_count_mismatch', COUNT(*) FROM public.spotify WHERE cardinality(string_to_array(artist_name,','))<>artist_count\nUNION ALL SELECT 'high_streams_iqr_outlier', COUNT(*) FROM public.spotify CROSS JOIN quartiles WHERE streams>q3+1.5*(q3-q1)\n) SELECT * FROM checks ORDER BY check_name;",
+    "note": "The diagnostic is intentionally readable, with several scans. For large data combine simple checks using FILTER in one scan. Duplicate candidates lack track IDs; do not delete them automatically. This does not exhaust every possible anomaly.",
+    "steps": [
+      "Compute stream quartiles and flag values above Q3 plus 1.5 times the interquartile range.",
+      "Separately count missing fields, candidate duplicate extra rows, invalid percentages, nonpositive BPM and artist-credit mismatches.",
+      "Combine named checks with UNION ALL. Flags identify observations to investigate; they do not justify deleting data."
+    ],
+    "category": "More to explore",
+    "difficulty": "Advanced",
+    "schemaReasoning": false
+  },
+  {
+    "id": 35,
+    "title": "Popularity rankings for each key",
+    "task": "Create a result table (SELECT, not a persistent table). Popularity proxy = average known streams per key. Exclude unknown keys. Output popularity_rank (DENSE_RANK), key, tracks, known_stream_tracks, avg_streams (2 decimals), total_streams. Rank on unrounded averages descending NULLS LAST; order rank then key.",
+    "sql": "WITH k AS (SELECT key, COUNT(*) AS tracks, COUNT(streams) AS known_stream_tracks, AVG(streams) AS mean_streams, SUM(streams) AS total_streams FROM public.spotify WHERE key IS NOT NULL GROUP BY key)\nSELECT DENSE_RANK() OVER (ORDER BY mean_streams DESC NULLS LAST) AS popularity_rank, key, tracks, known_stream_tracks, ROUND(mean_streams,2) AS avg_streams, total_streams\nFROM k ORDER BY popularity_rank,key;",
+    "note": "Group before window ranking; the window only sorts a handful of keys. Average and total streams answer different definitions of popularity.",
+    "steps": [
+      "Group known keys and compute average known streams, total streams and track counts.",
+      "Apply DENSE_RANK to unrounded averages: equal averages share a rank with no rank gaps.",
+      "Round only the displayed mean and order by rank then key. This is a result table, not CREATE TABLE."
+    ],
+    "category": "More to explore",
+    "difficulty": "Advanced",
+    "schemaReasoning": false
+  },
+  {
+    "id": 36,
+    "title": "Key popularity vs representation in top 50",
+    "task": "Top 50 = entire snapshot, not only songs released in 2023; exclude unknown streams. Tie-break by track_name then artist_name. Exclude unknown keys from key rankings but keep them eligible for the top 50. Output popularity_rank, key, avg_streams (2 decimals), top50_tracks, top50_pct (of all 50; 2 decimals), representation_rank (DENSE_RANK by count). Include known keys with zero top-50 tracks; order popularity_rank,key.",
+    "sql": "WITH k AS (SELECT key, AVG(streams) AS mean_streams FROM public.spotify WHERE key IS NOT NULL GROUP BY key),\ntop50 AS (SELECT key FROM public.spotify WHERE streams IS NOT NULL ORDER BY streams DESC,track_name,artist_name LIMIT 50),\nc AS (SELECT key,COUNT(*) AS n FROM top50 GROUP BY key)\nSELECT DENSE_RANK() OVER (ORDER BY k.mean_streams DESC NULLS LAST) AS popularity_rank, k.key, ROUND(k.mean_streams,2) AS avg_streams, COALESCE(c.n,0) AS top50_tracks,\nROUND(100.0*COALESCE(c.n,0)/(SELECT COUNT(*) FROM top50),2) AS top50_pct,\nDENSE_RANK() OVER (ORDER BY COALESCE(c.n,0) DESC) AS representation_rank\nFROM k LEFT JOIN c ON k.key=c.key ORDER BY popularity_rank,k.key;",
+    "note": "A LEFT JOIN keeps zero-count keys. Known-key shares may total less than 100% because unknown keys are still eligible for the top 50.",
+    "steps": [
+      "Calculate mean streams per known key across the full dataset. Separately select the top 50 tracks by known streams.",
+      "Count top-50 tracks by key and LEFT JOIN these counts to all known keys so zero-count keys remain.",
+      "Rank the averages and top-50 counts separately; divide counts by all 50 selected tracks, including those with unknown keys."
+    ],
+    "category": "More to explore",
+    "difficulty": "Advanced",
+    "schemaReasoning": false
+  },
+  {
+    "id": 37,
+    "title": "Average artist popularity >=90: Top Artist",
+    "task": "Schema reasoning: check for a popularity score column. Output column_name,data_type for names containing popularity. Explain why an average >=90 cannot be interpreted as a 0\u2013100 Spotify popularity score here. Do not rescale streams and pretend it is the missing metric.",
+    "sql": "SELECT column_name,data_type FROM information_schema.columns\nWHERE table_schema='public' AND table_name='spotify' AND column_name ILIKE '%popularity%' ORDER BY column_name;",
+    "note": "Not answerable from this schema. With validated per-track popularity scores and normalized credits, GROUP BY artist, HAVING AVG(popularity)>=90, and select a literal Top Artist label. Do not substitute streams>=90.",
+    "steps": [
+      "Search the actual schema for a popularity field.",
+      "No such field exists, so average popularity >=90 cannot be computed as a Spotify 0\u2013100 score.",
+      "With validated scores and individual artist credits, group by artist and filter HAVING AVG(popularity)>=90, then label qualifying rows Top Artist. Do not substitute streams>=90."
+    ],
+    "category": "More to explore",
+    "difficulty": "Schema check",
+    "schemaReasoning": true
+  }
+]

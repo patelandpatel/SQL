@@ -1,0 +1,184 @@
+{
+  "1": [
+    "Start with the full snapshot: do not filter released_year when the question asks for the most streamed tracks in this dataset.",
+    "Remove unknown stream totals, sort the remaining totals descending, and use title and artist as tie-breakers.",
+    "LIMIT 5 keeps the first five rows after ordering."
+  ],
+  "2": [
+    "Split each artist credit string on commas, then trim whitespace from each token.",
+    "The lateral subquery expands each track into its credited names and discards empty names.",
+    "COUNT(DISTINCT artist) counts parsed names, not credit combinations. This is still an estimate of real identities."
+  ],
+  "3": [
+    "GROUP BY released_year creates one group per release year.",
+    "COUNT(*) counts stored observations in each year.",
+    "SUM(COUNT(*)) OVER () totals the grouped counts; multiply by 100.0 to avoid integer division, then round."
+  ],
+  "4": [
+    "Expand each track into distinct parsed artist credits. Give every credited artist full credit for the track.",
+    "Group by individual artist and compute track count, known stream count, summed streams and average audio features.",
+    "Order total streams descending with unknown totals last and keep ten artists. Audio averages include tracks even when their streams are unknown."
+  ],
+  "5": [
+    "Inspect information_schema.columns rather than guessing a duration field.",
+    "Filter the actual table metadata for column names containing duration.",
+    "The empty result shows that this schema cannot answer longest or shortest songs; request duration and reliable track IDs."
+  ],
+  "6": [
+    "Calculate the highest Spotify playlist count with MAX.",
+    "Keep every row equal to that maximum, preserving ties.",
+    "Order the tied rows by title and artist for a stable displayed result."
+  ],
+  "7": [
+    "Use only tracks where streams and Spotify chart count are both known.",
+    "CORR calculates Pearson linear correlation across those pairs.",
+    "Return the paired sample count alongside the rounded coefficient; chart counts are not chart positions."
+  ],
+  "8": [
+    "AVG(bpm) averages known BPM values; COUNT(bpm) reports how many values contribute.",
+    "Round only the displayed average to two decimal places."
+  ],
+  "9": [
+    "The inner query first selects exactly 15 tracks by known streams, using the declared tie-breakers.",
+    "The outer query averages danceability only within that selected set.",
+    "Putting LIMIT after an aggregate over the whole table would not select the top tracks first."
+  ],
+  "10": [
+    "A positive count indicates chart presence.",
+    "Use AND so a track must meet both platform conditions, then count qualifying rows."
+  ],
+  "11": [
+    "Use CASE to distinguish positive playlist counts, zero counts and unknown counts.",
+    "Group by that classification and compute sample size and average valence.",
+    "Compare the groups descriptively; playlist presence does not prove a cause of valence."
+  ],
+  "12": [
+    "Group all tracks by release month across the dataset\u2019s release years.",
+    "Use a FILTER to count confirmed Deezer chart appearances.",
+    "Divide by known chart counts for the appearance rate, and retain the average chart count and group size."
+  ],
+  "13": [
+    "Require positive counts for both Deezer playlists and Spotify playlists.",
+    "COUNT(*) returns the number of track observations meeting both conditions."
+  ],
+  "14": [
+    "Use CASE to create the declared Shazam groups: unknown, high (100+), low (1\u201399), and absent.",
+    "Aggregate track counts and mean danceability per group.",
+    "The threshold is a convention for this exercise; it is not a universal definition of success."
+  ],
+  "15": [
+    "Keep tracks appearing on at least one Shazam chart and with known speechiness.",
+    "Integer division creates decade bins; LEAST places a value of 100 into the final 90\u2013100 bin.",
+    "Count occupied bins and divide by the total eligible count to get percentages."
+  ],
+  "16": [
+    "Group observations by mode.",
+    "Compute each group\u2019s count and average danceability; order by mode.",
+    "Describe the difference without claiming it is statistically significant."
+  ],
+  "17": [
+    "Group by key, keeping NULL as a separate unknown group.",
+    "Calculate minimum, maximum, average, and continuous quartiles of acousticness within each group.",
+    "Percentiles describe the distribution rather than only its center; compare group sizes too."
+  ],
+  "18": [
+    "Group tracks by release year and calculate average energy.",
+    "Keep the number of observations visible so sparse years are recognizable.",
+    "These are release cohorts in a selected snapshot, not historical measurements of all music."
+  ],
+  "19": [
+    "Group by musical key, including unknown keys as a separate group.",
+    "Count each group and divide by the whole dataset count for its share.",
+    "Sort counts descending to identify the most represented keys."
+  ],
+  "20": [
+    "Combine the four chart-presence tests with OR: any confirmed appearance qualifies.",
+    "Count qualifying tracks and average their recorded artist_count.",
+    "NULL on one platform does not block a confirmed positive count on another."
+  ],
+  "21": [
+    "Group by the recorded artist_count instead of splitting artist names.",
+    "Compute sample sizes and average danceability for each collaboration size.",
+    "Compare the averages and their group sizes; this alone cannot show causation."
+  ],
+  "22": [
+    "Filter to tracks released in 2023 before grouping by release month.",
+    "Calculate average valence and quartiles to show the distribution within each observed month.",
+    "Do not invent zeros for months missing from this sample."
+  ],
+  "23": [
+    "Group by both release year and key.",
+    "A window partitioned by release year totals the key counts for each year.",
+    "Divide each key\u2019s count by its own year total, keeping unknown keys in that denominator."
+  ],
+  "24": [
+    "Use AND across all four positive chart-count conditions.",
+    "Return the individual platform counts so the cross-platform presence can be inspected.",
+    "Sort by known stream totals descending and keep unknown stream totals last."
+  ],
+  "25": [
+    "Classify Apple chart presence into positive, zero or unknown.",
+    "For each group, report total tracks and known stream totals separately.",
+    "Compare minimum, median, mean and maximum streams; skew can make the mean differ greatly from the median."
+  ],
+  "26": [
+    "Select pairs with known BPM and danceability.",
+    "CORR measures their linear association and COUNT reports its sample size.",
+    "Round the output coefficient; do not confuse association with a causal effect."
+  ],
+  "27": [
+    "Select known liveness and acousticness pairs.",
+    "Compute Pearson correlation and report the number of pairs.",
+    "Liveness is an audio feature estimate, not proof that a song was recorded at a concert."
+  ],
+  "28": [
+    "Exclude unknown valence or stream values from the paired sample.",
+    "Compute Pearson correlation on the raw values.",
+    "Streams can be strongly skewed; a single coefficient can hide outliers or nonlinear relationships."
+  ],
+  "29": [
+    "Pair Spotify playlist counts with Apple chart counts for each track.",
+    "Compute the correlation and paired sample count.",
+    "The two metrics measure different kinds of presence; correlation does not imply one causes the other."
+  ],
+  "30": [
+    "Group by both key and mode to count every observed combination.",
+    "Use the total of grouped counts for whole-dataset percentages.",
+    "Sort by descending count and then the requested tie-breakers; keep unknown key groups."
+  ],
+  "31": [
+    "Recognize that playlist identities are unavailable: this adaptation groups by playlist-count bands.",
+    "CASE assigns each row to the specified band.",
+    "Compute mean speechiness and sample size for each band, without claiming these are individual playlist comparisons."
+  ],
+  "32": [
+    "MAKE_DATE builds a date from the validated release components.",
+    "EXTRACT(ISODOW) derives Monday=1 through Sunday=7, and OR defines confirmed appearance on any chart.",
+    "Group by weekday and compare both confirmed counts and their share of all tracks in that weekday group."
+  ],
+  "33": [
+    "Use known instrumentalness and energy pairs.",
+    "Return the paired count and Pearson linear correlation.",
+    "Interpret this feature association without claiming a mechanism or cause."
+  ],
+  "34": [
+    "Compute stream quartiles and flag values above Q3 plus 1.5 times the interquartile range.",
+    "Separately count missing fields, candidate duplicate extra rows, invalid percentages, nonpositive BPM and artist-credit mismatches.",
+    "Combine named checks with UNION ALL. Flags identify observations to investigate; they do not justify deleting data."
+  ],
+  "35": [
+    "Group known keys and compute average known streams, total streams and track counts.",
+    "Apply DENSE_RANK to unrounded averages: equal averages share a rank with no rank gaps.",
+    "Round only the displayed mean and order by rank then key. This is a result table, not CREATE TABLE."
+  ],
+  "36": [
+    "Calculate mean streams per known key across the full dataset. Separately select the top 50 tracks by known streams.",
+    "Count top-50 tracks by key and LEFT JOIN these counts to all known keys so zero-count keys remain.",
+    "Rank the averages and top-50 counts separately; divide counts by all 50 selected tracks, including those with unknown keys."
+  ],
+  "37": [
+    "Search the actual schema for a popularity field.",
+    "No such field exists, so average popularity >=90 cannot be computed as a Spotify 0\u2013100 score.",
+    "With validated scores and individual artist credits, group by artist and filter HAVING AVG(popularity)>=90, then label qualifying rows Top Artist. Do not substitute streams>=90."
+  ]
+}

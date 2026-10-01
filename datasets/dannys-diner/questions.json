@@ -1,0 +1,182 @@
+[
+  {
+    "id": 1,
+    "title": "Customer spending",
+    "task": "Calculate spending per customer. Output customer_id, total_spent; sort by customer_id.",
+    "sql": "SELECT s.customer_id, SUM(m.price) AS total_spent FROM sales s JOIN menu m USING (product_id) GROUP BY s.customer_id ORDER BY s.customer_id;",
+    "steps": [
+      "Join sales to menu using product_id to attach the unit price.",
+      "Sum prices for each customer, including every repeated sale.",
+      "Order customer IDs for a deterministic result."
+    ],
+    "note": "Aggregate after joining each sale to its menu price. Preserve repeated sales; they are separate purchases.",
+    "difficulty": "Easy",
+    "category": "Customer insights",
+    "schemaReasoning": false
+  },
+  {
+    "id": 2,
+    "title": "Distinct visit days",
+    "task": "Count visit dates for each customer. Output customer_id, visit_days; sort by customer_id.",
+    "sql": "SELECT customer_id, COUNT(DISTINCT order_date) AS visit_days FROM sales GROUP BY customer_id ORDER BY customer_id;",
+    "steps": [
+      "A sales row is an item, not a visit.",
+      "Count distinct order_date values per customer. Multiple items on the same date count as one visit."
+    ],
+    "note": "COUNT(DISTINCT) deduplicates dates within each customer; COUNT(*) would count items.",
+    "difficulty": "Easy",
+    "category": "Customer insights",
+    "schemaReasoning": false
+  },
+  {
+    "id": 3,
+    "title": "First purchases",
+    "task": "Find each customer\u2019s earliest purchased dishes. Output customer_id, product_name. Keep distinct dishes tied on the first date; sort by customer_id, product_name. There is no time-of-day or order ID to break same-day ties.",
+    "sql": "WITH first_dates AS (SELECT customer_id, MIN(order_date) AS first_date FROM sales GROUP BY customer_id) SELECT DISTINCT s.customer_id, m.product_name FROM sales s JOIN first_dates f ON s.customer_id=f.customer_id AND s.order_date=f.first_date JOIN menu m USING (product_id) ORDER BY s.customer_id, m.product_name;",
+    "steps": [
+      "Find the minimum purchase date for each customer.",
+      "Join back to all sales on that date, then attach dish names.",
+      "Deduplicate dish names, not sales before calculating purchase counts elsewhere."
+    ],
+    "note": "Do not pick one arbitrary same-day purchase with ROW_NUMBER.",
+    "difficulty": "Intermediate",
+    "category": "Customer insights",
+    "schemaReasoning": false
+  },
+  {
+    "id": 4,
+    "title": "Bestselling dishes",
+    "task": "Find the overall bestseller and its purchase count. Output product_name, purchases; include ties, sort product_name.",
+    "sql": "WITH counts AS (SELECT m.product_name, COUNT(*) AS purchases FROM sales s JOIN menu m USING (product_id) GROUP BY m.product_name) SELECT product_name, purchases FROM counts WHERE purchases=(SELECT MAX(purchases) FROM counts) ORDER BY product_name;",
+    "steps": [
+      "Count sales of each dish across all customers.",
+      "Compare each count with the maximum group count.",
+      "Keep all tied winners."
+    ],
+    "note": "Aggregate after joining each sale to its menu price. Preserve repeated sales; they are separate purchases.",
+    "difficulty": "Easy",
+    "category": "Customer insights",
+    "schemaReasoning": false
+  },
+  {
+    "id": 5,
+    "title": "Customer favorites",
+    "task": "Find each customer\u2019s most ordered dishes. Output customer_id, product_name, purchases. Keep all ties, sorted by customer_id, product_name.",
+    "sql": "WITH counts AS (SELECT s.customer_id, m.product_name, COUNT(*) AS purchases FROM sales s JOIN menu m USING (product_id) GROUP BY s.customer_id,m.product_name), ranked AS (SELECT *, DENSE_RANK() OVER (PARTITION BY customer_id ORDER BY purchases DESC) AS r FROM counts) SELECT customer_id,product_name,purchases FROM ranked WHERE r=1 ORDER BY customer_id,product_name;",
+    "steps": [
+      "Count purchases by both customer and dish.",
+      "Rank those counts within each customer.",
+      "Keep rank 1, including every tied favorite."
+    ],
+    "note": "Aggregate before ranking so the window processes groups instead of raw sales.",
+    "difficulty": "Intermediate",
+    "category": "Customer insights",
+    "schemaReasoning": false
+  },
+  {
+    "id": 6,
+    "title": "First member purchases",
+    "task": "Find the earliest dishes purchased as a member. Output customer_id, product_name; keep distinct tied dishes and sort by both columns. Convention: the join date counts as membership (order_date >= join_date).",
+    "sql": "WITH eligible AS (SELECT s.*, MIN(s.order_date) OVER (PARTITION BY s.customer_id) AS first_date FROM sales s JOIN members b USING (customer_id) WHERE s.order_date>=b.join_date) SELECT DISTINCT e.customer_id,m.product_name FROM eligible e JOIN menu m USING (product_id) WHERE e.order_date=e.first_date ORDER BY e.customer_id,m.product_name;",
+    "steps": [
+      "Join members to sales and remove purchases before joining.",
+      "Compute the first qualifying date for each member.",
+      "Return every distinct dish on that date."
+    ],
+    "note": "Apply membership eligibility before finding the minimum date.",
+    "difficulty": "Intermediate",
+    "category": "Membership & rewards",
+    "schemaReasoning": false
+  },
+  {
+    "id": 7,
+    "title": "Last purchases before joining",
+    "task": "Find the last pre-membership dishes. Output customer_id, product_name; preserve distinct tied dishes and sort both columns. Pre-membership means order_date < join_date.",
+    "sql": "WITH eligible AS (SELECT s.*, MAX(s.order_date) OVER (PARTITION BY s.customer_id) AS last_date FROM sales s JOIN members b USING (customer_id) WHERE s.order_date<b.join_date) SELECT DISTINCT e.customer_id,m.product_name FROM eligible e JOIN menu m USING (product_id) WHERE e.order_date=e.last_date ORDER BY e.customer_id,m.product_name;",
+    "steps": [
+      "Filter to dates strictly before the member joined.",
+      "Find the latest remaining date within each member.",
+      "Retain all distinct dishes on that date."
+    ],
+    "note": "Using <= would incorrectly include joining-day purchases.",
+    "difficulty": "Intermediate",
+    "category": "Membership & rewards",
+    "schemaReasoning": false
+  },
+  {
+    "id": 8,
+    "title": "Pre-membership totals",
+    "task": "Summarize items and spending before joining. Output customer_id, total_items, total_spent; sort customer_id. Include registered members with no earlier purchases as zero totals; nonmembers are excluded.",
+    "sql": "SELECT b.customer_id, COUNT(s.product_id) AS total_items, COALESCE(SUM(m.price),0) AS total_spent FROM members b LEFT JOIN sales s ON s.customer_id=b.customer_id AND s.order_date<b.join_date LEFT JOIN menu m ON m.product_id=s.product_id GROUP BY b.customer_id ORDER BY b.customer_id;",
+    "steps": [
+      "Start from members so a member with no earlier sales can still appear.",
+      "Put the date condition in the LEFT JOIN; a WHERE filter could discard zero-purchase members.",
+      "Count matched items, sum prices, and replace an empty sum with zero."
+    ],
+    "note": "COUNT(*) on a left join would count the unmatched placeholder row.",
+    "difficulty": "Intermediate",
+    "category": "Membership & rewards",
+    "schemaReasoning": false
+  },
+  {
+    "id": 9,
+    "title": "Standard loyalty points",
+    "task": "Compute each customer\u2019s points: 10 per dollar, doubled for sushi. Output customer_id, points; sort customer_id. This exercise includes every customer and all dates regardless of membership.",
+    "sql": "SELECT s.customer_id, SUM(m.price*10*CASE WHEN m.product_name='sushi' THEN 2 ELSE 1 END) AS points FROM sales s JOIN menu m USING (product_id) GROUP BY s.customer_id ORDER BY s.customer_id;",
+    "steps": [
+      "Attach price and product name to each sale.",
+      "Use CASE for the sushi multiplier; apply it to price times ten.",
+      "Sum the points per customer."
+    ],
+    "note": "Aggregate after joining each sale to its menu price. Preserve repeated sales; they are separate purchases.",
+    "difficulty": "Easy",
+    "category": "Membership & rewards",
+    "schemaReasoning": false
+  },
+  {
+    "id": 10,
+    "title": "January welcome-week points",
+    "task": "Compute January points for members A and B. Output customer_id, points; sort customer_id. Use January 1\u201331, 2021. Exercise convention: pre-join purchases earn standard points; joining day through day 6 earn double points on every dish; sushi stays double outside that window. Multipliers never stack. February purchases are excluded.",
+    "sql": "SELECT b.customer_id, COALESCE(SUM(m.price*10*CASE WHEN s.order_date BETWEEN b.join_date AND b.join_date+6 THEN 2 WHEN m.product_name='sushi' THEN 2 ELSE 1 END),0) AS points FROM members b LEFT JOIN sales s ON s.customer_id=b.customer_id AND s.order_date>=DATE '2021-01-01' AND s.order_date<DATE '2021-02-01' LEFT JOIN menu m ON m.product_id=s.product_id WHERE b.customer_id IN ('A','B') GROUP BY b.customer_id ORDER BY b.customer_id;",
+    "steps": [
+      "Restrict sales to January before calculating points.",
+      "Check the inclusive seven-day welcome window first; otherwise apply the ordinary sushi rule.",
+      "Use a single multiplier so welcome-week sushi is double, not quadruple.",
+      "This exercise explicitly awards standard points before joining; a policy that excludes those dates gives different totals."
+    ],
+    "note": "Use an exclusive next-month boundary; joining day + 6 is the seventh day.",
+    "difficulty": "Advanced",
+    "category": "Membership & rewards",
+    "schemaReasoning": false
+  },
+  {
+    "id": 11,
+    "title": "Bonus: membership purchase ledger",
+    "task": "Build a purchase ledger. Output customer_id, order_date, product_name, price, member. Label eligible member purchases Y and all others N. Preserve duplicate sales; sort customer_id, order_date, product_name.",
+    "sql": "SELECT s.customer_id,s.order_date,m.product_name,m.price,CASE WHEN s.order_date>=b.join_date THEN 'Y' ELSE 'N' END AS member FROM sales s JOIN menu m USING (product_id) LEFT JOIN members b USING (customer_id) ORDER BY s.customer_id,s.order_date,m.product_name;",
+    "steps": [
+      "Join every sale to its menu entry.",
+      "Left join membership records to retain customer C.",
+      "CASE marks joining-day and subsequent member purchases Y; NULL membership dates fall into N."
+    ],
+    "note": "Do not add DISTINCT: the ledger must preserve repeated purchases.",
+    "difficulty": "Intermediate",
+    "category": "Bonus exercises",
+    "schemaReasoning": false
+  },
+  {
+    "id": 12,
+    "title": "Bonus: member purchase ranks",
+    "task": "Extend the ledger with ranking. Output customer_id, order_date, product_name, price, member, ranking. Rank member purchase dates using RANK; same-date purchases tie and create gaps. Pre-membership and nonmember rows have NULL ranking. Sort customer_id, order_date, product_name.",
+    "sql": "WITH ledger AS (SELECT s.customer_id,s.order_date,m.product_name,m.price,CASE WHEN s.order_date>=b.join_date THEN 'Y' ELSE 'N' END AS member FROM sales s JOIN menu m USING (product_id) LEFT JOIN members b USING (customer_id)) SELECT customer_id,order_date,product_name,price,member,CASE WHEN member='Y' THEN RANK() OVER (PARTITION BY customer_id,member ORDER BY order_date) END AS ranking FROM ledger ORDER BY customer_id,order_date,product_name;",
+    "steps": [
+      "Build the membership ledger first.",
+      "Partition the ranking by customer and membership flag, so pre-join purchases cannot shift member ranks.",
+      "Use RANK for ties and gaps; CASE hides ranks for N rows."
+    ],
+    "note": "RANK and DENSE_RANK agree on some sample rows but differ when tied member dates precede later dates. The edge fixture tests this.",
+    "difficulty": "Advanced",
+    "category": "Bonus exercises",
+    "schemaReasoning": false
+  }
+]

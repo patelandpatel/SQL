@@ -1,0 +1,70 @@
+[
+  {
+    "id": "spotify",
+    "name": "Spotify",
+    "subtitle": "The sound of data",
+    "description": "Explore streaming hits, artist collaborations and the audio features behind popular music.",
+    "database": "spotify",
+    "user": "spotify_practice",
+    "schema": "public",
+    "tables": [
+      "spotify"
+    ],
+    "rowCount": 953,
+    "icon": "\u224b",
+    "color": "green",
+    "tags": [
+      "Aggregations",
+      "Correlations",
+      "Window functions"
+    ],
+    "source": null,
+    "about": "A selected 2023 snapshot, not streams earned only during 2023. Duration and a 0\u2013100 popularity score are unavailable. Repeated observations and unknown values are preserved.",
+    "tests": [
+      {
+        "id": "sample",
+        "name": "Spotify snapshot",
+        "description": "The current 953-row dataset. Checks result columns, NULLs, duplicate counts, values and ordering.",
+        "database": "spotify"
+      }
+    ]
+  },
+  {
+    "id": "dannys-diner",
+    "name": "Danny\u2019s Diner",
+    "subtitle": "Small menu. Big questions.",
+    "description": "Turn restaurant orders into customer insights. Practice joins, membership rules and loyalty rewards.",
+    "database": "dannys_diner",
+    "user": "diner_practice",
+    "schema": "dannys_diner",
+    "tables": [
+      "sales",
+      "menu",
+      "members"
+    ],
+    "rowCount": 20,
+    "icon": "\u9eba",
+    "color": "orange",
+    "tags": [
+      "Joins",
+      "Date logic",
+      "Ranking"
+    ],
+    "source": "https://8weeksqlchallenge.com/case-study-1/",
+    "about": "Adapted from Danny Ma\u2019s 8 Week SQL Challenge. 15 sales, 3 menu items and 2 members. Repeated sales represent separate items. Same-day purchases have no internal ordering. Reference solutions here were written for this app, not copied from the paid official solutions.",
+    "tests": [
+      {
+        "id": "sample",
+        "name": "Original diner sample",
+        "description": "The original 15 purchases, including repeats and nonmember C.",
+        "database": "dannys_diner"
+      },
+      {
+        "id": "edge",
+        "name": "Ties & reward boundaries",
+        "description": "An isolated fixture with tied favorites, duplicate sales, join-day purchases, day 6/day 7 boundaries, January 31 and February 1. Run the same SQL unchanged.",
+        "database": "dannys_diner_test"
+      }
+    ]
+  }
+]
